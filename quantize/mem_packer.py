@@ -11,6 +11,7 @@ class MemoryPacker(nn.Module):
         self.qmax = 2 ** (n_bits - 1) - 1
         self.n_bits = n_bits
         self.pack_dim = pack_dim
+        print("MemPacker will introduce error now, accurate version is in developing")
 
     def quant(self, x, scale, round_zero_point, uint=False):
         x_int = (x / scale).round_()

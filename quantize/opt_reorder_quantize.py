@@ -23,7 +23,6 @@ def R1_reorder(layer_norm, qproj, kproj, vproj, index, counts):
     layer_norm.register_buffer("reorder_index", index)
     layer_norm.out_quantizer.cluster_dim = 2
     layer_norm.out_quantizer.cluster_counts = counts
-    # layer_norm.out_quantizer.dynamic = True
     if R_DEBUG_BIT:
         layer_norm.out_quantizer.change_n_bits(R_DEBUG_BIT)
 
@@ -37,15 +36,10 @@ def R1_reorder(layer_norm, qproj, kproj, vproj, index, counts):
 
 
 def R2_reorder(qproj, kproj, qkt_matmul, index, counts):
-    # 每个head内部单独调整
-    # print("before",qproj.weight.data.amax(1)[:10])
     qproj.weight.data = torch.index_select(qproj.weight.data, 0, index)
     qproj.bias.data = torch.index_select(qproj.bias.data, 0, index)
     kproj.weight.data = torch.index_select(kproj.weight.data, 0, index)
     kproj.bias.data = torch.index_select(kproj.bias.data, 0, index)
-    # print("after",qproj.weight.data.amax(1)[:10])
-
-    # breakpoint()
 
     qkt_matmul.set_ic_cluster_counts(counts, x1_dim=2, x2_dim=2)
     if R_DEBUG_BIT:
@@ -54,15 +48,12 @@ def R2_reorder(qproj, kproj, qkt_matmul, index, counts):
 
 
 def R3_reorder(vproj, pv_matmul, out_proj, index, counts):
-    # 每个head内部单独调整
     vproj.weight.data = torch.index_select(vproj.weight.data, 0, index)
     vproj.bias.data = torch.index_select(vproj.bias.data, 0, index)
     pv_matmul.set_ic_cluster_counts(counts, cluster_x1=False)
     out_proj.weight.data = torch.index_select(out_proj.weight.data, 1, index)
     out_proj.set_ic_cluster_counts(counts)
-    # breakpoint()
     if R_DEBUG_BIT:
-        # pv_matmul.x1_quantizer.change_n_bits(R_DEBUG_BIT)
         pv_matmul.x2_quantizer.change_n_bits(R_DEBUG_BIT)
         out_proj.act_quantizer.change_n_bits(R_DEBUG_BIT)
 
@@ -98,14 +89,6 @@ def opt_reorder_quantize(
     reorder="12345",
 ):
     print("Starting ...")
-
-    # for debug
-    global R_DEBUG_BIT
-    R_DEBUG_BIT = args.r_debug_bit
-    global DEBUG_BREAK_LAYER
-    DEBUG_BREAK_LAYER = args.debug_break_layer
-    if args.debug_break_layer == 0:
-        return lm.model
 
     model = lm.model
     dev = lm.device
@@ -151,9 +134,7 @@ def opt_reorder_quantize(
         except ValueError:
             pass
 
-    # 这里之后inps 就是第0个layer的输入 128,2048,2048
-    # 这里之后cache 就是i=128，attention_mask 上三角矩阵
-    layers[0] = layers[0].module  # layers[0] 被包成了一个catcher，还回来
+    layers[0] = layers[0].module
     layers[0] = layers[0].cpu()
     model.model.decoder.embed_tokens = model.model.decoder.embed_tokens.cpu()
     model.model.decoder.embed_positions = model.model.decoder.embed_positions.cpu()
@@ -176,18 +157,9 @@ def opt_reorder_quantize(
     for i in range(len(layers)):
         if i == DEBUG_BREAK_LAYER:
             break
-        # if i!=23:
-        #     continue
         print(f"=== Start quantize layer {i} ===")
         layer = layers[i].to(dev)
         qlayer = QuantOPTDecoderLayer(lm.model.config, layer, args)
-        # if i + 1 == len(layers):
-        #     qlayer.self_attn_layer_norm.out_quantizer.change_n_bits(8)
-        #     qlayer.final_layer_norm.out_quantizer.change_n_bits(8)
-
-        if qlayer.self_attn_layer_norm.out_quantizer.n_bits == 4:
-            qlayer.self_attn_layer_norm.out_quantizer.change_n_bits(8)
-            qlayer.final_layer_norm.out_quantizer.change_n_bits(8)
 
         # register hook for data
         handlers = []
@@ -229,18 +201,6 @@ def opt_reorder_quantize(
                 module.name = name
                 handler = module.register_forward_hook(layer_i0max_hook)
                 handlers.append(handler)
-            if args.act_dist_plot and i in [_ for _ in range(0, len(layers), 6)]:
-                module.name = name
-                if "q_proj" in name or "fc1" in name or "out_proj" in name:
-                    if not layer_i0max_hook in module._forward_hooks.values():
-                        # print(f"register layer_i0max_hook hook for {i} {name}")
-                        handler = module.register_forward_hook(layer_i0max_hook)
-                        handlers.append(handler)
-                if "v_proj" in name or "q_proj" in name or "k_proj" in name:
-                    if not layer_omax_hook in module._forward_hooks.values():
-                        # print(f"register layer_omax_hook hook for {i} {name}")
-                        handler = module.register_forward_hook(layer_omax_hook)
-                        handlers.append(handler)
 
         # inference to collect data for reordering
         for j in range(args.nsamples):
@@ -321,23 +281,11 @@ def opt_reorder_quantize(
                 R5_index,
                 counts,
             )
+
+        outs = quant_layer(qlayer, args, outs, inps, attention_mask, dev)
+
         imax_dict.clear()
         omax_dict.clear()
-        # for name, m in qlayer.named_modules():
-        #     if isinstance(m, (QuantLinear)):
-        #         a=m.act_quantizer.n_bits
-        #         w=m.weight_quantizer.n_bits
-        #         print(name,a,w)
-        #     if isinstance(m, ReorderLayerNorm) and m.out_quantizer is not None:
-        #         a=m.out_quantizer.n_bits
-        #         print(name,a)
-        #     if isinstance(m, QuantMatMul):
-        #         a=m.x1_quantizer.n_bits
-        #         b=m.x2_quantizer.n_bits
-        #         print(name,a,b)
-        if not args.act_dist_plot:
-            outs = quant_layer(qlayer, args, outs, inps, attention_mask, dev)
-        # TODO: to cpu
         layers[i] = qlayer.to("cpu")
         del layer
         torch.cuda.empty_cache()
@@ -351,20 +299,7 @@ def opt_reorder_quantize(
             "max memory_allocated",
             torch.cuda.max_memory_allocated(lm._device) / 1024**2,
         )
-        # breakpoint()
 
-    for name, m in qlayer.named_modules():
-        if isinstance(m, (QuantLinear)):
-            a = m.act_quantizer.n_bits if m.act_quantizer is not None else None
-            w = m.weight_quantizer.n_bits if m.weight_quantizer is not None else None
-            print(name, a, w)
-        if isinstance(m, ReorderLayerNorm) and m.out_quantizer is not None:
-            a = m.out_quantizer.n_bits
-            print(name, a)
-        if isinstance(m, QuantMatMul):
-            a = m.x1_quantizer.n_bits
-            b = m.x2_quantizer.n_bits
-            print(name, a, b)
     del inps, outs
     model.config.use_cache = use_cache
     return model

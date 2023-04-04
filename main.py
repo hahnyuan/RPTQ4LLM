@@ -14,10 +14,6 @@ from models.int_opt_layer import QuantOPTAttention
 from pprint import pprint
 from parallel_utils import map_layers_to_multi_gpus, get_lowest_occupied_gpu
 import torch.nn as nn
-from torch.profiler import profile, record_function, ProfilerActivity
-
-# 125m 1.3b 6.7b 13b 30b
-
 from quantize.opt_reorder_quantize import opt_reorder_quantize
 from tqdm import tqdm
 
@@ -38,29 +34,6 @@ net_choices = [
 # tasks lambada_openai,piqa,arc_easy,arc_challenge,openbookqa,boolq
 
 
-def mem_test_hook(m, i, o):
-    print(
-        m.name,
-        "memory_allocated",
-        i,
-        torch.cuda.memory_allocated() / 1024 / 1024,
-        "max memory_allocated",
-        torch.cuda.max_memory_allocated() / 1024**2,
-    )
-
-
-import functools
-
-
-def debug_decorator(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        breakpoint()
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 @torch.no_grad()
 def evaluate(lm, args):
     for name, m in lm.model.named_modules():
@@ -69,8 +42,6 @@ def evaluate(lm, args):
             # m.register_forward_hook(mem_test_hook)
     results = {}
     if args.multigpu:
-        if "CUDA_VISIBLE_DEVICES" in os.environ:
-            del os.environ["CUDA_VISIBLE_DEVICES"]
         if "opt" in args.model:
             map_layers_to_multi_gpus(lm.model.model.decoder.layers)
             input_device = lm.model.model.decoder.layers[0].device
@@ -130,9 +101,7 @@ def evaluate(lm, args):
             if "c4" == dataset:
                 testenc = testloader
             else:
-                testenc = (
-                    testloader.input_ids
-                )  # 有个小坑 如果某个input_ids 有超过2*2048个词，nsamples 就不准了
+                testenc = testloader.input_ids
 
             nsamples = testenc.numel() // lm.seqlen
             use_cache = lm.model.config.use_cache
@@ -148,10 +117,9 @@ def evaluate(lm, args):
                     outputs = lm.model.model.decoder(batch)
                 elif "llama" in args.model:
                     outputs = lm.model.model(batch)
-                hidden_states = outputs[0]  # .to(lm.model.lm_head.weight.device)
-                # lm.model.lm_head = lm.model.lm_head.to(output_device)
-                logits = lm.model.lm_head(hidden_states)  # .contiguous()
-                shift_logits = logits[:, :-1, :]  # .contiguous()
+                hidden_states = outputs[0]
+                logits = lm.model.lm_head(hidden_states)
+                shift_logits = logits[:, :-1, :]
                 shift_labels = testenc[:, (i * lm.seqlen) : ((i + 1) * lm.seqlen)][
                     :, 1:
                 ].to(lm.model.lm_head.weight.device)
@@ -164,14 +132,6 @@ def evaluate(lm, args):
                 nlls.append(neg_log_likelihood)
                 if i == args.limit:
                     break
-                if i == 1:
-                    print(
-                        "memory_allocated",
-                        i,
-                        torch.cuda.memory_allocated() / 1024 / 1024,
-                        "max memory_allocated",
-                        torch.cuda.max_memory_allocated() / 1024**2,
-                    )
 
             ppl = torch.exp(torch.stack(nlls).sum() / (nsamples * lm.seqlen))
             print(dataset, ppl.item())
@@ -244,13 +204,9 @@ def main():
     )
     parser.add_argument("--limit", type=int, default=-1)
     parser.add_argument("--a_dynamic", action="store_true")
-    parser.add_argument("--layerwise_debug", action="store_true")
     parser.add_argument("--eval_base_ppl", action="store_true")
     parser.add_argument("--act_dist_plot", action="store_true")
-    parser.add_argument("--r_debug_bit", type=int, default=0)
-    parser.add_argument("--debug_break_layer", type=int, default=-1)
     parser.add_argument("--only_quant_kv", action="store_true")
-    parser.add_argument("--profile", action="store_true")
     parser.add_argument(
         "--pack_weight",
         action="store_true",
@@ -311,24 +267,8 @@ def main():
             )
             torch.save(dataloader, cache_dataloader)
         lm.model.eval()
-    elif "llama" in args.model:
-        cache_dataloader = (
-            f"/tmp/dataloader_llama_{args.calib_dataset}_{args.nsamples}.cache"
-        )
-        if os.path.exists(cache_dataloader):
-            dataloader = torch.load(cache_dataloader)
-            print(f"load calibration from {cache_dataloader}")
-        else:
-            dataloader, testloader = get_loaders(
-                args.calib_dataset,
-                nsamples=args.nsamples,
-                seed=args.seed,
-                model=args.model,
-                seqlen=lm.seqlen,
-                cache_dir=args.cache_dir,
-            )
-            torch.save(dataloader, cache_dataloader)
-        lm.model.eval()
+    else:
+        raise NotImplementedError()
 
     args.weight_quant_params = {
         "n_bits": args.wbits,
@@ -375,13 +315,6 @@ def main():
         "n_bits": 16 if args.only_quant_kv else max(8, args.abits),
         "metric": "fix0to1",
     }
-    args.llama_down_quant_params = {
-        "n_bits": 16 if args.only_quant_kv else args.abits,
-        "per_channel_axes": [],
-        "symmetric": False,
-        "metric": args.metric,
-        "dynamic": args.a_dynamic,
-    }
     n_clusters = {
         "R1": args.R1_clusters,
         "R2": args.R2_clusters,
@@ -394,48 +327,13 @@ def main():
         lm._device = f"cuda:{gpu_id}"
         print(f"set quantization in gpu {gpu_id}")
     if "opt" in args.model:
-        if args.profile:
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=True,
-            ) as prof:
-                with record_function("cali"):
-                    opt_reorder_quantize(
-                        lm,
-                        args,
-                        dataloader,
-                        n_clusters,
-                        args.reorder,
-                    )
-            print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
-            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
-            breakpoint()
-        else:
-            opt_reorder_quantize(
-                lm,
-                args,
-                dataloader,
-                n_clusters,
-                args.reorder,
-            )
-
-        print(
-            "after quantization memory_allocated",
-            torch.cuda.memory_allocated() / 1024 / 1024,
+        opt_reorder_quantize(
+            lm,
+            args,
+            dataloader,
+            n_clusters,
+            args.reorder,
         )
-
-        if args.layerwise_debug:
-            # layer wise testing for debug:
-            for i, layer in enumerate(lm.model.model.decoder.layers[::-1]):
-                for _ in lm.model.model.decoder.layers:
-                    if hasattr(_, "set_quant_state"):
-                        _.set_quant_state(False, False)
-                if hasattr(layer, "set_quant_state"):
-                    layer.set_quant_state(
-                        not args.disable_w_quant, not args.disable_a_quant
-                    )
-                results = evaluate(lm, args)
-                print(i, results)
 
         for layer in lm.model.model.decoder.layers:
             if hasattr(layer, "set_quant_state"):
@@ -443,11 +341,11 @@ def main():
                     not args.disable_w_quant, not args.disable_a_quant
                 )
 
-    else:
-        lm.bloom_sequential(dataloader)
     print(time.time() - tick)
 
     results = evaluate(lm, args)
+    if not os.path.exists(args.output_path):
+        os.makedirs(args.output_path)
     with open(
         f"{args.output_path}/{args.net}.txt",
         "a+",
