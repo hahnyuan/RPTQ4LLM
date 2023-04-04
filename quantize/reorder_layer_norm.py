@@ -11,6 +11,7 @@ class ReorderLayerNorm(nn.Module):
         self.out_quantizer = UniformAffineQuantizer(**act_quant_params)
 
     def forward(self, x):
+        # TODO: Integrating CUDA kernels to achieve speedup
         out = self.ori_layer_norm.forward(x)
         if hasattr(self, "reorder_index"):
             if x.ndim == 3:
