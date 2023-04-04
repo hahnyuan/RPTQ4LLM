@@ -3,6 +3,8 @@ Large-scale language models (LLMs) have shown exceptional performance on various
 In our [paper](https://arxiv.org/abs/2304.01089), we propose a novel reorder-based quantization approach called RPTQ. The RPTQ approach involves rearranging the channels in the activations and then quantizing them in clusters, thereby reducing the impact of the range difference between channels. 
 By implementing the RPTQ approach, we achieved a significant breakthrough by pushing LLM models to 3 bit activation for the first time.
 
+![Overview](/ims/cover.png)
+
 ### Requirements
 python packages
 - torch >= 2.0.0
