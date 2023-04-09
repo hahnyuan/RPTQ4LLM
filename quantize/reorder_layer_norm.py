@@ -3,7 +3,7 @@ import torch.nn as nn
 from quantize.quantizer import UniformAffineQuantizer
 from torch.utils.cpp_extension import load
 
-USE_CUDA=False
+USE_CUDA=True
 if USE_CUDA:
     reorder_layer_norm_fp16 = load(
     'reorder_layernorm_fp16', ['./cuda/reorder_layernorm.cu'], 

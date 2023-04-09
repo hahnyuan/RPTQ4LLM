@@ -12,8 +12,8 @@ def set_seed(seed):
 def get_wikitext2(nsamples, seed, seqlen, model,cache_dir):
     print("get_wikitext2")
     from datasets import load_dataset
-    traindata = load_dataset('wikitext', 'wikitext-2-raw-v1',cache_dir='/datasets/tmp/wikitext/', split='train')
-    testdata = load_dataset('wikitext', 'wikitext-2-raw-v1',cache_dir='/datasets/tmp/wikitext/', split='test')
+    traindata = load_dataset('wikitext', 'wikitext-2-raw-v1',cache_dir='./datasets/tmp/wikitext/', split='train')
+    testdata = load_dataset('wikitext', 'wikitext-2-raw-v1',cache_dir='./datasets/tmp/wikitext/', split='test')
 
     from transformers import AutoTokenizer
     if "llama" in model:
@@ -39,8 +39,8 @@ def get_wikitext2(nsamples, seed, seqlen, model,cache_dir):
 def get_ptb(nsamples, seed, seqlen, model,cache_dir):
     print("get_ptb")
     from datasets import load_dataset
-    traindata = load_dataset('ptb_text_only', 'penn_treebank',cache_dir='/datasets/tmp/ptb_text_only/', split='train')
-    valdata = load_dataset('ptb_text_only', 'penn_treebank',cache_dir='/datasets/tmp/ptb_text_only/', split='validation')
+    traindata = load_dataset('ptb_text_only', 'penn_treebank',cache_dir='./datasets/tmp/ptb_text_only/', split='train')
+    valdata = load_dataset('ptb_text_only', 'penn_treebank',cache_dir='./datasets/tmp/ptb_text_only/', split='validation')
 
     from transformers import AutoTokenizer
     if "llama" in model:
@@ -67,10 +67,10 @@ def get_c4(nsamples, seed, seqlen, model,cache_dir):
     print("get_c4")
     from datasets import load_dataset
     traindata = load_dataset(
-        'allenai/c4', 'allenai--c4', cache_dir='/datasets/tmp/allenai--c4/', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train'
+        'allenai/c4', 'allenai--c4', cache_dir='./datasets/tmp/allenai--c4/', data_files={'train': 'en/c4-train.00000-of-01024.json.gz'}, split='train'
     )
     valdata = load_dataset(
-        'allenai/c4', 'allenai--c4', cache_dir='/datasets/tmp/allenai--c4/',data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation'
+        'allenai/c4', 'allenai--c4', cache_dir='./datasets/tmp/allenai--c4/',data_files={'validation': 'en/c4-validation.00000-of-00008.json.gz'}, split='validation'
     )
 
     from transformers import AutoTokenizer
