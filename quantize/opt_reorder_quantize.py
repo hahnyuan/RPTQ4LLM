@@ -7,9 +7,9 @@ from models.int_opt_layer import QuantOPTDecoderLayer
 from quantize.quant_transformer_layer import quant_layer
 from quantize.reorder_utils import (
     tensor_calc_reorder_index,
-    imax_dict,
-    omax_dict,
-    omax_dict_debug,
+    ic_maxmin_dict,
+    oc_maxmin_dict,
+    oc_maxmin_dict_debug,
     layer_i0max_hook,
     layer_omax_hook,
 )
@@ -211,7 +211,7 @@ def opt_reorder_quantize(
             handler.remove()
 
         if enable_R1:
-            feature_max, feature_min = omax_dict[f"self_attn_layer_norm"]
+            feature_max, feature_min = oc_maxmin_dict[f"self_attn_layer_norm"]
 
             R1_index, counts = tensor_calc_reorder_index(
                 feature_max, feature_min, n_clusters["R1"]
@@ -227,8 +227,8 @@ def opt_reorder_quantize(
             )
 
         if enable_R2:
-            qmax, qmin = omax_dict[f"self_attn.q_proj"]
-            kmax, kmin = omax_dict[f"self_attn.k_proj"]
+            qmax, qmin = oc_maxmin_dict[f"self_attn.q_proj"]
+            kmax, kmin = oc_maxmin_dict[f"self_attn.k_proj"]
             R2_index, counts = tensor_calc_reorder_index(
                 [qmax, kmax], [qmin, kmin], n_clusters["R2"], qlayer.self_attn.num_heads
             )
@@ -242,7 +242,7 @@ def opt_reorder_quantize(
             )
 
         if enable_R3:
-            feature_max, feature_min = imax_dict[f"self_attn.out_proj"]
+            feature_max, feature_min = ic_maxmin_dict[f"self_attn.out_proj"]
             R3_index, counts = tensor_calc_reorder_index(
                 feature_max, feature_min, n_clusters["R3"], qlayer.self_attn.num_heads
             )
@@ -256,7 +256,7 @@ def opt_reorder_quantize(
             )
 
         if enable_R4:
-            feature_max, feature_min = omax_dict[f"final_layer_norm"]
+            feature_max, feature_min = oc_maxmin_dict[f"final_layer_norm"]
 
             R4_index, counts = tensor_calc_reorder_index(
                 feature_max, feature_min, n_clusters["R4"]
@@ -270,7 +270,7 @@ def opt_reorder_quantize(
             )
 
         if enable_R5:
-            feature_max, feature_min = imax_dict[f"fc2"]
+            feature_max, feature_min = ic_maxmin_dict[f"fc2"]
             R5_index, counts = tensor_calc_reorder_index(
                 feature_max, feature_min, n_clusters["R5"]
             )
@@ -284,8 +284,8 @@ def opt_reorder_quantize(
 
         outs = quant_layer(qlayer, args, outs, inps, attention_mask, dev)
 
-        imax_dict.clear()
-        omax_dict.clear()
+        ic_maxmin_dict.clear()
+        oc_maxmin_dict.clear()
         layers[i] = qlayer.to("cpu")
         del layer
         torch.cuda.empty_cache()
