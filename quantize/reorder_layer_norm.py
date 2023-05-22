@@ -6,7 +6,7 @@ from torch.utils.cpp_extension import load
 USE_CUDA=False
 if USE_CUDA:
     reorder_layer_norm_fp16 = load(
-    'reorder_layernorm_fp16', ['./cuda/reorder_layernorm.cu'], 
+    'reorder_layer_norm_fp16', ['./cuda/reorder_layernorm.cu'], 
     extra_cuda_cflags=['--use_fast_math'],
     extra_ldflags=["-L/usr/local/cuda/lib64/"])
 

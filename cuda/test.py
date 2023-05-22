@@ -1,7 +1,7 @@
 from torch.utils.cpp_extension import load
 import torch
 reorder_layer_norm_fp16 = load(
-    'reorder_layernorm_fp16', ['reorder_layernorm.cu'], 
+    'reorder_layer_norm_fp16', ['reorder_layernorm.cu'], 
     extra_cuda_cflags=['--use_fast_math'],
     extra_ldflags=["-L/usr/local/cuda/lib64/"])
 
@@ -16,8 +16,7 @@ def add_cuda_op(x, y,w,b):
     index[1]=31
     index[31]=2
     dst_index=torch.argsort(index)
-    var,mean=torch.var_mean(x,0)
-    reorder_layer_norm_fp16.forward(x, output,mean,var,w,b,dst_index)
+    reorder_layer_norm_fp16.forward(x, output,w,b,dst_index)
     return output
 
 bias=torch.arange(0,32,1,device='cuda').half()
